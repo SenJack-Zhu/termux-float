@@ -153,7 +153,8 @@ public class TermuxFloatView extends LinearLayout {
         android.util.Log.e(LOG_TAG, "initFloatView: mExtraKeysView=" + mExtraKeysView);
         if (mExtraKeysView != null) {
             mExtraKeysView.setExtraKeysViewClient(new TerminalExtraKeys(mTerminalView));
-            setupExtraKeys();
+            // Delay reload until after layout so GridLayout has a measured width
+            mExtraKeysView.post(this::setupExtraKeys);
         }
 
         mFloatingBubbleManager = new FloatingBubbleManager(this);
@@ -253,8 +254,17 @@ public class TermuxFloatView extends LinearLayout {
         if (mPreferences != null) {
             layoutParams.x = mPreferences.getWindowX();
             layoutParams.y = mPreferences.getWindowY();
-            layoutParams.width = mPreferences.getWindowWidth();
-            layoutParams.height = mPreferences.getWindowHeight();
+            int w = mPreferences.getWindowWidth();
+            int h = mPreferences.getWindowHeight();
+            // If using the library default (500x500), scale to a sensible fraction of the screen
+            if (w <= 500 && h <= 500) {
+                Point size = new Point();
+                getDisplay().getRealSize(size);
+                w = (int) (size.x * 0.85f);
+                h = (int) (size.y * 0.55f);
+            }
+            layoutParams.width = w;
+            layoutParams.height = h;
         }
 
         mWindowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
@@ -277,6 +287,15 @@ public class TermuxFloatView extends LinearLayout {
         float touchY = event.getRawY();
 
         if (didClickInsideWindowControls(touchX, touchY)) {
+            // Dragging from the control bar blank area moves the window
+            if (event.getAction() == MotionEvent.ACTION_DOWN && didClickOnDragHandle(touchX, touchY)) {
+                updateLongPressMode(true);
+                initialX = x;
+                initialY = y;
+                initialTouchX = touchX;
+                initialTouchY = touchY;
+                return true;
+            }
             // avoid unintended focus event if we are tapping on our window controls
             // so that keyboard doesn't possibly show briefly
             return false;
@@ -296,6 +315,16 @@ public class TermuxFloatView extends LinearLayout {
                 break;
         }
         return false;
+    }
+
+    private boolean didClickOnDragHandle(float touchX, float touchY) {
+        View dragHandle = findViewById(R.id.drag_handle);
+        if (dragHandle == null || dragHandle.getVisibility() == View.GONE) return false;
+        dragHandle.getLocationOnScreen(windowControlsLocation);
+        int hx = windowControlsLocation[0];
+        int hy = windowControlsLocation[1];
+        return (touchX >= hx && touchX <= hx + dragHandle.getWidth()) &&
+                (touchY >= hy && touchY <= hy + dragHandle.getHeight());
     }
 
     private boolean didClickInsideWindowControls(float touchX, float touchY) {
