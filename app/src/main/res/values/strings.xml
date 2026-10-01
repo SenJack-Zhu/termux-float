@@ -17,4 +17,7 @@
     <string name="notification_action_exit">Exit</string>
     <string name="notification_message_visible">Touch to hide window.</string>
     <string name="notification_message_hidden">Touch to show window.</string>
+
+    <string name="no_text_selected">No text selected</string>
+    <string name="text_copied">Copied to clipboard</string>
 </resources>

@@ -73,6 +73,10 @@ dependencies {
     implementation "androidx.annotation:annotation:1.9.1"
     implementation "androidx.activity:activity:1.9.3"
 
+    // Material is a runtime-only transitive dep of termux-shared, but ExtraKeysView.IExtraKeysView
+    // exposes MaterialButton in its API, so we need it on the compile classpath.
+    implementation "com.google.android.material:material:1.4.0"
+
     implementation "com.termux.termux-app:termux-shared:8aca6dbbf4"
     implementation "com.termux.termux-app:terminal-view:8aca6dbbf4"
 
