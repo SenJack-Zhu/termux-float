@@ -3,6 +3,7 @@ package com.termux.window;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.os.Build;
@@ -121,7 +122,7 @@ public class TermuxFloatView extends LinearLayout {
         }
     }
 
-    public void initFloatView(TermuxFloatService service) {
+    public boolean initFloatView(TermuxFloatService service) {
         Logger.logDebug(LOG_TAG, "initFloatView");
 
         // Load termux shared properties
@@ -131,7 +132,8 @@ public class TermuxFloatView extends LinearLayout {
         // This will also fail if TermuxConstants.TERMUX_FLOAT_PACKAGE_NAME does not equal applicationId
         mPreferences = TermuxFloatAppSharedPreferences.build(getContext(), true);
         if (mPreferences == null) {
-            return;
+            Logger.logError(LOG_TAG, "Failed to build TermuxFloatAppSharedPreferences, aborting float view init");
+            return false;
         }
 
         mTermuxFloatSessionClient = new TermuxFloatSessionClient(service, this);
@@ -143,6 +145,8 @@ public class TermuxFloatView extends LinearLayout {
 
         mFloatingBubbleManager = new FloatingBubbleManager(this);
         initWindowControls();
+
+        return true;
     }
 
     private void initWindowControls() {
@@ -159,14 +163,26 @@ public class TermuxFloatView extends LinearLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-
-        Point displaySize = new Point();
-        getDisplay().getSize(displaySize);
-        DISPLAY_WIDTH = displaySize.x;
-        DISPLAY_HEIGHT = displaySize.y;
+        updateDisplaySize();
 
         if (mTermuxFloatSessionClient != null)
             mTermuxFloatSessionClient.onAttachedToWindow();
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Refresh display dimensions when screen rotates or font scale changes
+        updateDisplaySize();
+    }
+
+    /** Update DISPLAY_WIDTH and DISPLAY_HEIGHT using a non-deprecated API. */
+    private void updateDisplaySize() {
+        if (getDisplay() == null) return;
+        Point displaySize = new Point();
+        getDisplay().getRealSize(displaySize);
+        DISPLAY_WIDTH = displaySize.x;
+        DISPLAY_HEIGHT = displaySize.y;
     }
 
     @Override

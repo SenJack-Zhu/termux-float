@@ -55,7 +55,7 @@ public class TermuxFloatService extends Service {
         runStartForeground();
 
         if (mFloatingWindow == null && !initializeFloatView())
-            return Service.START_NOT_STICKY;
+            return Service.START_STICKY;
 
         String action = null;
         if (intent != null) {
@@ -83,7 +83,7 @@ public class TermuxFloatService extends Service {
             setVisible(true);
         }
 
-        return Service.START_NOT_STICKY;
+        return Service.START_STICKY;
 
     }
 
@@ -100,7 +100,6 @@ public class TermuxFloatService extends Service {
     /** Request to stop service. */
     public void requestStopService() {
         Logger.logDebug(LOG_TAG, "Requesting to stop service");
-        runStopForeground();
         stopSelf();
     }
 
@@ -114,7 +113,19 @@ public class TermuxFloatService extends Service {
     /** Make service run in foreground mode. */
     private void runStartForeground() {
         setupNotificationChannel();
-        startForeground(TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_ID, buildNotification());
+        Notification notification = buildNotification();
+        if (notification != null) {
+            startForeground(TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_ID, notification);
+        } else {
+            // Fallback: build a minimal notification to avoid NPE in startForeground()
+            notification = new Notification.Builder(this, TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_CHANNEL_ID)
+                    .setSmallIcon(R.mipmap.ic_service_notification)
+                    .setContentTitle(TermuxConstants.TERMUX_FLOAT_APP_NAME)
+                    .setOngoing(true)
+                    .setShowWhen(false)
+                    .build();
+            startForeground(TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_ID, notification);
+        }
     }
 
     /** Make service leave foreground mode. */
@@ -180,7 +191,11 @@ public class TermuxFloatService extends Service {
             floatWindowWasNull = true;
         }
 
-        mFloatingWindow.initFloatView(this);
+        if (!mFloatingWindow.initFloatView(this)) {
+            Logger.logError(LOG_TAG, "Failed to init float view, stopping service");
+            requestStopService();
+            return false;
+        }
 
         mSession = createTermuxSession(
                 new ExecutionCommand(0, null, null, null, mFloatingWindow.getProperties().getDefaultWorkingDirectory(), ExecutionCommand.Runner.TERMINAL_SESSION.getName(), false), null);

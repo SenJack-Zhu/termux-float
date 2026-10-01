@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:name=".TermuxFloatApplication"
@@ -33,7 +34,13 @@
             android:theme="@android:style/Theme.Material"
             android:name=".TermuxFloatPermissionActivity" />
 
-        <service android:name=".TermuxFloatService" android:exported="false"/>
+        <service android:name=".TermuxFloatService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating terminal session" />
+        </service>
     </application>
 
 </manifest>

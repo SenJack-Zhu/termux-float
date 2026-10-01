@@ -71,6 +71,7 @@ dependencies {
     testImplementation "junit:junit:4.13.2"
 
     implementation "androidx.annotation:annotation:1.9.1"
+    implementation "androidx.activity:activity:1.9.3"
 
     implementation "com.termux.termux-app:termux-shared:8aca6dbbf4"
     implementation "com.termux.termux-app:terminal-view:8aca6dbbf4"
