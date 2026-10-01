@@ -259,5 +259,6 @@ public class TermuxFloatViewClient extends TermuxTerminalViewClientBase {
     public void changeFontSize(boolean increase) {
         mView.getPreferences().changeFontSize(increase);
         mView.getTerminalView().setTextSize(mView.getPreferences().getFontSize());
+        mView.reloadExtraKeys();
     }
 }

@@ -36,6 +36,11 @@
             android:layout_marginEnd="8dp"/>
     </LinearLayout>
 
+    <com.termux.shared.termux.extrakeys.ExtraKeysView
+        android:id="@+id/extra_keys_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
     <com.termux.view.TerminalView
         android:id="@+id/terminal_view"
         android:layout_width="match_parent"

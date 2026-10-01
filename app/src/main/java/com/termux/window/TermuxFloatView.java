@@ -20,7 +20,10 @@ import android.widget.LinearLayout;
 
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxConstants;
+import com.termux.shared.termux.extrakeys.ExtraKeysInfo;
+import com.termux.shared.termux.extrakeys.ExtraKeysView;
 import com.termux.shared.termux.settings.preferences.TermuxFloatAppSharedPreferences;
+import com.termux.shared.termux.terminal.io.TerminalExtraKeys;
 import com.termux.shared.view.KeyboardUtils;
 import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
@@ -40,6 +43,7 @@ public class TermuxFloatView extends LinearLayout {
     WindowManager mWindowManager;
 
     private TerminalView mTerminalView;
+    private ExtraKeysView mExtraKeysView;
     ViewGroup mWindowControls;
     FloatingBubbleManager mFloatingBubbleManager;
 
@@ -143,6 +147,13 @@ public class TermuxFloatView extends LinearLayout {
         mTerminalView.setTerminalViewClient(mTermuxFloatViewClient);
         mTermuxFloatViewClient.initFloatView();
 
+        // Set up the extra keys bar (Ctrl, Alt, Esc, arrows, etc.)
+        mExtraKeysView = findViewById(R.id.extra_keys_view);
+        if (mExtraKeysView != null) {
+            mExtraKeysView.setExtraKeysViewClient(new TerminalExtraKeys(mTerminalView));
+            setupExtraKeys();
+        }
+
         mFloatingBubbleManager = new FloatingBubbleManager(this);
         initWindowControls();
 
@@ -158,6 +169,32 @@ public class TermuxFloatView extends LinearLayout {
 
         Button exitButton = findViewById(R.id.exit_button);
         exitButton.setOnClickListener(v -> exit());
+    }
+
+    /**
+     * Configure the extra keys bar with a default set of useful keys.
+     * Layout:
+     *   Row 1: ESC, TAB, CTRL, ALT, FN, HOME, END
+     *   Row 2: LEFT, DOWN, UP, RIGHT, PGUP, PGDN, /, -
+     */
+    private void setupExtraKeys() {
+        try {
+            String extraKeysConfig = "[[\"ESC\",\"TAB\",\"CTRL\",\"ALT\",\"FN\",\"HOME\",\"END\"]," +
+                    "[\"LEFT\",\"DOWN\",\"UP\",\"RIGHT\",\"PGUP\",\"PGDN\",\"/\",\"-\"]]";
+            ExtraKeysInfo extraKeysInfo = new ExtraKeysInfo(extraKeysConfig,
+                    (com.termux.shared.termux.extrakeys.ExtraKeysConstants.ExtraKeyDisplayMap) null,
+                    (com.termux.shared.termux.extrakeys.ExtraKeysConstants.ExtraKeyDisplayMap) null);
+            mExtraKeysView.reload(extraKeysInfo, mPreferences.getFontSize());
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to setup extra keys", e);
+        }
+    }
+
+    /** Reload extra keys after font size change so they scale together. */
+    public void reloadExtraKeys() {
+        if (mExtraKeysView != null && mPreferences != null) {
+            setupExtraKeys();
+        }
     }
 
     @Override
