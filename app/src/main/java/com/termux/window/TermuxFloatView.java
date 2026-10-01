@@ -149,6 +149,7 @@ public class TermuxFloatView extends LinearLayout {
 
         // Set up the extra keys bar (Ctrl, Alt, Esc, arrows, etc.)
         mExtraKeysView = findViewById(R.id.extra_keys_view);
+        android.util.Log.e(LOG_TAG, "initFloatView: mExtraKeysView=" + mExtraKeysView);
         if (mExtraKeysView != null) {
             mExtraKeysView.setExtraKeysViewClient(new TerminalExtraKeys(mTerminalView));
             setupExtraKeys();
@@ -184,9 +185,11 @@ public class TermuxFloatView extends LinearLayout {
             ExtraKeysInfo extraKeysInfo = new ExtraKeysInfo(extraKeysConfig,
                     (com.termux.shared.termux.extrakeys.ExtraKeysConstants.ExtraKeyDisplayMap) null,
                     (com.termux.shared.termux.extrakeys.ExtraKeysConstants.ExtraKeyDisplayMap) null);
+            android.util.Log.e(LOG_TAG, "setupExtraKeys: fontSize=" + mPreferences.getFontSize() + ", matrix rows=" + extraKeysInfo.getMatrix().length);
             mExtraKeysView.reload(extraKeysInfo, mPreferences.getFontSize());
+            android.util.Log.e(LOG_TAG, "setupExtraKeys: reload done, childCount=" + mExtraKeysView.getChildCount());
         } catch (Exception e) {
-            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to setup extra keys", e);
+            android.util.Log.e(LOG_TAG, "setupExtraKeys FAILED: " + e.getMessage(), e);
         }
     }
 
