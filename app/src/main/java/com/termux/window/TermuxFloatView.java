@@ -258,10 +258,9 @@ public class TermuxFloatView extends LinearLayout {
             int h = mPreferences.getWindowHeight();
             // If using the library default (500x500), scale to a sensible fraction of the screen
             if (w <= 500 && h <= 500) {
-                Point size = new Point();
-                getDisplay().getRealSize(size);
-                w = (int) (size.x * 0.85f);
-                h = (int) (size.y * 0.55f);
+                android.util.DisplayMetrics dm = getContext().getResources().getDisplayMetrics();
+                w = (int) (dm.widthPixels * 0.85f);
+                h = (int) (dm.heightPixels * 0.55f);
             }
             layoutParams.width = w;
             layoutParams.height = h;
