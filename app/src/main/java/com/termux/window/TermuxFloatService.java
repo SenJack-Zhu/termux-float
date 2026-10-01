@@ -223,7 +223,11 @@ public class TermuxFloatService extends Service {
     private void setVisible(boolean newVisibility) {
         mVisibleWindow = newVisibility;
         mFloatingWindow.setVisibility(newVisibility ? View.VISIBLE : View.GONE);
-        ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_ID, buildNotification());
+        Notification notification = buildNotification();
+        if (notification != null) {
+            ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(
+                    TermuxConstants.TERMUX_FLOAT_APP_NOTIFICATION_ID, notification);
+        }
     }
 
 
