@@ -127,7 +127,7 @@ public class TermuxFloatView extends LinearLayout {
     }
 
     public boolean initFloatView(TermuxFloatService service) {
-        Logger.logDebug(LOG_TAG, "initFloatView");
+        android.util.Log.e(LOG_TAG, "initFloatView START");
 
         // Load termux shared properties
         mProperties = new TermuxFloatAppSharedProperties(getContext());
@@ -136,9 +136,10 @@ public class TermuxFloatView extends LinearLayout {
         // This will also fail if TermuxConstants.TERMUX_FLOAT_PACKAGE_NAME does not equal applicationId
         mPreferences = TermuxFloatAppSharedPreferences.build(getContext(), true);
         if (mPreferences == null) {
-            Logger.logError(LOG_TAG, "Failed to build TermuxFloatAppSharedPreferences, aborting float view init");
+            android.util.Log.e(LOG_TAG, "initFloatView: mPreferences is NULL, aborting");
             return false;
         }
+        android.util.Log.e(LOG_TAG, "initFloatView: mPreferences OK, fontSize=" + mPreferences.getFontSize());
 
         mTermuxFloatSessionClient = new TermuxFloatSessionClient(service, this);
 
@@ -158,6 +159,7 @@ public class TermuxFloatView extends LinearLayout {
         mFloatingBubbleManager = new FloatingBubbleManager(this);
         initWindowControls();
 
+        android.util.Log.e(LOG_TAG, "initFloatView DONE");
         return true;
     }
 
