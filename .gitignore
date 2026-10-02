@@ -11,4 +11,8 @@ github.properties
 build*.log
 *.png
 ui-*.xml
+smoke-ui.xml
 !app/src/main/res/**/*.png
+
+# CI artifacts downloaded by tools/actions.ps1
+/artifacts/

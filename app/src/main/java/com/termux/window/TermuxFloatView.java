@@ -935,15 +935,17 @@ public class TermuxFloatView extends LinearLayout {
         int newHeight;
         int newY;
         if (imeVisible) {
-            // Keep the top edge where the user put it, and give up as much height as the keyboard
-            // needs; the terminal reflows to fewer rows. When the window would become too small,
-            // slide it up instead so the extra keys bar stays reachable directly above the IME.
+            // Slide the window up so its bottom edge (the extra keys bar) sits just above the
+            // keyboard, and keep the height the user chose. Squeezing the window instead makes the
+            // terminal reflow into one row too few, and its last line then ends up hidden behind
+            // the extra keys bar.
+            newHeight = mBaseWindowHeight;
             int keyboardTop = Math.max(0, DISPLAY_HEIGHT - mImeShift - IME_CLEARANCE_PX);
-            int availableAboveIme = keyboardTop - 40;
-            newHeight = Math.min(mBaseWindowHeight, Math.max(MIN_IME_WINDOW_HEIGHT, availableAboveIme));
-            newY = mBaseWindowY;
-            if (mBaseWindowY + newHeight > keyboardTop - 8) {
-                newY = Math.max(0, keyboardTop - 8 - newHeight);
+            newY = keyboardTop - 8 - newHeight;
+            if (newY < 0) {
+                // Not enough room above the keyboard for the whole window: keep it on screen and
+                // let its bottom be covered by the IME, like a normal (non overlay) app.
+                newY = 0;
             }
         } else {
             newHeight = mBaseWindowHeight;

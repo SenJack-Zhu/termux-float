@@ -77,12 +77,17 @@ $shown = (adb shell "dumpsys input_method | grep mInputShown") -join ''
 Check 'KBD raises the soft keyboard' ($shown -match 'true') $shown
 
 Write-Host '== 4. keyboard-aware window geometry ===========================' -ForegroundColor Cyan
+# With the keyboard open the window keeps its height but slides up so that the extra keys bar ends
+# up directly above the IME. Squeezing it instead reflows the terminal into one row too few and its
+# last line would be hidden behind the extra keys bar.
 $attrsIme = WindowAttrs
-if ($attrsIme -match '\((\d+)x(\d+)\)') {
-    $h = [int]$Matches[2]
-    Check 'window squeezed to fit above the IME' ($h -lt 1440) "height=$h"
+if ($attrsIme -match '\((-?\d+),(-?\d+)\)\((\d+)x(\d+)\)') {
+    $imeY = [int]$Matches[2]
+    $imeH = [int]$Matches[4]
+    Check 'window positioned so the keys sit above the IME' (($imeY + $imeH) -le 2412) "y=$imeY h=$imeH"
+    Check 'window keeps a usable height above the IME' ($imeH -ge 900) "height=$imeH"
 } else {
-    Check 'window squeezed to fit above the IME' $false $attrsIme
+    Check 'window geometry readable' $false $attrsIme
 }
 
 Write-Host '== 5. copy -> paste round trip =================================' -ForegroundColor Cyan

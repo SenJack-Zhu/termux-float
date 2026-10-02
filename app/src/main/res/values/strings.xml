@@ -30,6 +30,6 @@
     <string name="action_paste">PASTE</string>
     <string name="action_done">DONE</string>
     <string name="drag_handle_description">Drag to move window</string>
-    <string name="selection_mode_hint">Text selection: drag the handles, then COPY</string>
+    <string name="selection_mode_hint">Select text → COPY</string>
     <string name="bubble_glyph">$_</string>
 </resources>
