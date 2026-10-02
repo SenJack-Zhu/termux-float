@@ -39,10 +39,18 @@ selection bar → terminal → hotkey bar.
 | Type | tap the terminal, the soft keyboard opens |
 
 **Hotkey bar.** Two rows of keys sit directly *below* the terminal so they end up just above the
-soft keyboard when it is open, within thumb reach:
+soft keyboard when it is open, within thumb reach. Row 1 holds the keys used while reading output
+(navigation and clipboard), row 2 the symbols and terminal control codes:
 
-- Row 1: `ESC` `TAB` `CTL` `ALT` `SHF` `FN` `<` `v` `^` `>`
-- Row 2: `PG^` `PGv` `HOM` `END` `/` `-` `|` `~` `KBD` `CPY` `PST` `ALL` `^C` `^D` `^L` `^Z`
+```
+Row 1: ESC  TAB  CTL  ALT  SHF  FN   ↑   ↓   ←   →   HOME  END  CPY  PASTE
+Row 2: KBD   /    -    |    ~    \    _   ^C  ^D  ^L  ^Z  ALL  PGUP  PGDN
+```
+
+`↑ ↓ ← →` are the cursor keys (`ESC [ A` .. `ESC [ D`, or `ESC O A` .. in application cursor mode),
+while `PGUP`/`PGDN` send `ESC [ 5 ~` / `ESC [ 6 ~`, i.e. page scroll. They are different keys and
+both are needed. Labels are rendered in upper case because `ExtraKeysView` applies
+`setAllCaps(true)` to every button.
 
 `CTL`, `ALT`, `SHF` and `FN` are **sticky**: tap to arm them (the button lights up), and the next
 key typed on the soft keyboard or any on-screen key is modified. This also works for characters
@@ -50,8 +58,9 @@ typed with the system keyboard, and `FN` maps letters to the terminal's function
 (`FN`+`w/a/s/d` = arrows, `FN`+`p`/`n` = page up/down, `FN`+`1..0` = F1..F10). Long press a sticky
 key to lock it.
 
-`KBD` shows the soft keyboard. `CPY`, `ALL` and `PST` handle the clipboard, `^C`/`^D`/`^L`/`^Z`
-send control characters.
+`KBD` shows the soft keyboard. `CPY`, `ALL` and `PASTE` handle the clipboard, `^C`/`^D`/`^L`/`^Z`
+send control characters, and `_` / `\` cover the two characters that are otherwise awkward to reach
+on a phone keyboard.
 
 **Copy and paste.** The system text-selection toolbar cannot be relied on inside an overlay
 window, so this fork adds its own:
@@ -61,14 +70,15 @@ window, so this fork adds its own:
 - `COPY` copies the current selection. When nothing is selected it falls back to the whole visible
   screen, so the button never silently does nothing.
 - `ALL` copies the terminal screen (scrollback included, trailing blank cells trimmed).
-- `PST` pastes the clipboard. Multi-line clipboard content is flattened to a single line first, so
+- `PASTE` pastes the clipboard. Multi-line clipboard content is flattened to a single line first, so
   pasting a snippet cannot run a batch of shell commands by accident.
 
 **Soft keyboard handling.** The window is an overlay, so the keyboard is drawn *on top of* it
 instead of pushing it up. The window therefore watches the IME and, while the keyboard is open,
-squeezes itself into the space above it (plus a margin for keyboard toolbars such as clipboard or
-suggestion rows) so that the hotkey bar stays tappable. The original size and position are
-restored when the keyboard closes.
+slides up so that its bottom edge (the hotkey bar) rests just above the keyboard, keeping the
+terminal's height intact (squeezing it instead drops a terminal row whose last line would be hidden
+behind the hotkey bar). A margin is added for keyboard toolbars such as clipboard or suggestion
+rows. The original position is restored when the keyboard closes.
 
 Known device-dependent limitation: hiding an already visible keyboard from an overlay window is not
 supported by every IME (`hideSoftInputFromWindow()` requires a normal application window token).

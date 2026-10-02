@@ -52,13 +52,17 @@ public class TermuxFloatView extends LinearLayout {
      * Extra keys layout: two rows of 14 keys, so the whole bar stays about as tall as the soft
      * keyboard's suggestion strip while covering the keys that are painful to type on a phone.
      *
-     * Sticky keys (state toggled by ExtraKeysView itself and read through
+     * <p>Row 1 holds the navigation and clipboard keys (the ones used most when reading output),
+     * row 2 the symbols and terminal control codes.</p>
+     *
+     * <p>Sticky keys (state toggled by ExtraKeysView itself and read through
      * {@link #readExtraKeysSpecialButton(SpecialButton)}): CTRL, ALT, SHIFT, FN.
      * Handled by {@link FloatExtraKeysClient}: CPY, PSTE, KBRD, ALL, and the 0xNN control
-     * code points (0x03 = Ctrl-C, 0x04 = Ctrl-D, 0x0c = Ctrl-L, 0x1a = Ctrl-Z).
+     * code points (0x03 = Ctrl-C, 0x04 = Ctrl-D, 0x0c = Ctrl-L, 0x1a = Ctrl-Z).</p>
      *
-     * Displays are kept to 2-4 characters because a 14 column bar on a 1080 px wide window gives
-     * roughly 74 px per key.
+     * <p>Displays are kept short (3-5 characters) because a 16 column GridLayout on a 1040 px wide
+     * window leaves roughly 65 px per key; the arrows use the real arrow glyphs that
+     * {@code EXTRA_KEY_DISPLAY_MAPS.CLASSIC_ARROWS_DISPLAY} defines for the "default" style.</p>
      */
     private static final String EXTRA_KEYS_CONFIG =
             "[[" +
@@ -68,31 +72,33 @@ public class TermuxFloatView extends LinearLayout {
                     "{key: \"ALT\", display: \"ALT\"}," +
                     "{key: \"SHIFT\", display: \"SHF\"}," +
                     "{key: \"FN\", display: \"FN\"}," +
-                    "{key: \"LEFT\", display: \"<\"}," +
-                    "{key: \"DOWN\", display: \"v\"}," +
-                    "{key: \"UP\", display: \"^\"}," +
-                    "{key: \"RIGHT\", display: \">\"}" +
-                    "],[" +
-                    "{key: \"PGUP\", display: \"PG^\"}," +
-                    "{key: \"PGDN\", display: \"PGv\"}," +
-                    "{key: \"HOME\", display: \"HOM\"}," +
+                    "{key: \"UP\", display: \"\u2191\"}," +
+                    "{key: \"DOWN\", display: \"\u2193\"}," +
+                    "{key: \"LEFT\", display: \"\u2190\"}," +
+                    "{key: \"RIGHT\", display: \"\u2192\"}," +
+                    "{key: \"HOME\", display: \"HOME\"}," +
                     "{key: \"END\", display: \"END\"}," +
+                    "{key: \"CPY\", display: \"CPY\"}," +
+                    "{key: \"PSTE\", display: \"PASTE\"}" +
+                    "],[" +
+                    "{key: \"KBRD\", display: \"KBD\"}," +
                     "{key: \"/\", display: \"/\"}," +
                     "{key: \"-\", display: \"-\"}," +
                     "{key: \"|\", display: \"|\"}," +
                     "{key: \"~\", display: \"~\"}," +
-                    "{key: \"KBRD\", display: \"KBD\"}," +
-                    "{key: \"CPY\", display: \"CPY\"}," +
-                    "{key: \"PSTE\", display: \"PST\"}," +
-                    "{key: \"ALL\", display: \"ALL\"}," +
+                    "{key: \"\\\\\", display: \"\\\\\"}," +
+                    "{key: \"_\", display: \"_\"}," +
                     "{key: \"0x03\", display: \"^C\"}," +
                     "{key: \"0x04\", display: \"^D\"}," +
                     "{key: \"0x0c\", display: \"^L\"}," +
-                    "{key: \"0x1a\", display: \"^Z\"}" +
+                    "{key: \"0x1a\", display: \"^Z\"}," +
+                    "{key: \"ALL\", display: \"ALL\"}," +
+                    "{key: \"PGUP\", display: \"PGUP\"}," +
+                    "{key: \"PGDN\", display: \"PGDN\"}" +
                     "]]";
 
     /** Text size (in px, i.e. the terminal font size) used for the extra keys labels. */
-    private static final int EXTRA_KEYS_LABEL_SIZE_PX = 24;
+    private static final int EXTRA_KEYS_LABEL_SIZE_PX = 18;
 
     /** Minimum window width/height in px when pinch-resizing. */
     private static final int MIN_WINDOW_SIZE = 180;

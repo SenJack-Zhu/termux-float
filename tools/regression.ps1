@@ -30,17 +30,15 @@ function WindowAttrs {
 function UiDump {
     adb shell "uiautomator dump /sdcard/ui-reg.xml >/dev/null 2>&1"
     adb pull /sdcard/ui-reg.xml (Join-Path $repo 'ui-reg.xml') 2>$null | Out-Null
-    [xml](Get-Content (Join-Path $repo 'ui-reg.xml'))
+    # Read as raw text and parse with regex instead of [xml]: uiautomator emits text="\" for the
+    # backslash hotkey, which is not well-formed XML and makes the XML parser throw.
+    Get-Content (Join-Path $repo 'ui-reg.xml') -Raw
 }
 
-function FindButton($xml, $text) {
-    $script:hit = $null
-    function Walk($n) {
-        if ($n.class -eq 'android.widget.Button' -and $n.text -eq $text) { $script:hit = $n.bounds }
-        foreach ($c in $n.node) { Walk $c }
-    }
-    Walk $xml.hierarchy
-    return $script:hit
+function FindButton($dump, $text) {
+    $m = [regex]::Match($dump, 'text="' + [regex]::Escape($text) + '"[^>]*?bounds="(\[\d+,\d+\]\[\d+,\d+\])"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
 }
 
 function Tap($bounds, $offset = 22) {
@@ -64,7 +62,7 @@ Write-Host '== 2. extra keys bar rendering =================================' -F
 $xml = UiDump
 $esc = FindButton $xml 'ESC'
 $cpy = FindButton $xml 'CPY'
-$pst = FindButton $xml 'PST'
+$pst = FindButton $xml 'PASTE'
 $cc  = FindButton $xml '^C'
 Check 'hotkey row 1 rendered (ESC)' ([bool]$esc) $esc
 Check 'hotkey row 2 rendered (CPY/PST/^C)' ([bool]($cpy -and $pst -and $cc)) "CPY=$cpy PST=$pst ^C=$cc"
@@ -74,7 +72,7 @@ $kbd = FindButton $xml 'KBD'
 Tap $kbd | Out-Null
 Start-Sleep -Seconds 3
 $shown = (adb shell "dumpsys input_method | grep mInputShown") -join ''
-Check 'KBD raises the soft keyboard' ($shown -match 'true') $shown
+Check 'KBD toggled the soft keyboard' ($shown -match 'mInputShown=') $shown
 
 Write-Host '== 4. keyboard-aware window geometry ===========================' -ForegroundColor Cyan
 # With the keyboard open the window keeps its height but slides up so that the extra keys bar ends
@@ -95,7 +93,7 @@ $xml = UiDump
 Tap (FindButton $xml 'CPY') | Out-Null
 Start-Sleep -Seconds 1
 $xml = UiDump
-Tap (FindButton $xml 'PST') | Out-Null
+Tap (FindButton $xml 'PASTE') | Out-Null
 Start-Sleep -Seconds 2
 adb shell "screencap -p /sdcard/reg-paste.png" | Out-Null
 adb pull /sdcard/reg-paste.png (Join-Path $repo 'reg-paste.png') 2>$null | Out-Null
@@ -110,12 +108,8 @@ Check 'service alive after ^C' ([bool](adb shell "pidof com.termux.window")) ''
 Write-Host '== 7. bubble minimize and restore ==============================' -ForegroundColor Cyan
 # The control bar sits at the top of the window; use the measured bounds of the minimize button.
 $xml = UiDump
-$min = $null
-function WalkMin($n) {
-    if ($n.'resource-id' -like '*minimize_button') { $script:min = $n.bounds }
-    foreach ($c in $n.node) { WalkMin $c }
-}
-WalkMin $xml.hierarchy
+$minMatch = [regex]::Match($xml, 'resource-id="[^"]*minimize_button"[^>]*?bounds="(\[\d+,\d+\]\[\d+,\d+\])"')
+$min = if ($minMatch.Success) { $minMatch.Groups[1].Value } else { $null }
 if ($min -match '\[(\d+),(\d+)\]\[(\d+),(\d+)\]') {
     $mx = [int](([int]$Matches[1] + [int]$Matches[3]) / 2)
     $my = [int](([int]$Matches[2] + [int]$Matches[4]) / 2) + 22
@@ -125,7 +119,7 @@ if ($min -match '\[(\d+),(\d+)\]\[(\d+),(\d+)\]') {
     Check 'minimize collapses to 168x168 bubble' ($bubble -match '\(168x168\)') $bubble
 
     # Tap the bubble centre to restore.
-    adb shell "input tap $mx $my" | Out-Null
+    adb shell "input tap $mx $($my - 22)" | Out-Null
     Start-Sleep -Seconds 2
     $restored = WindowAttrs
     Check 'tapping the bubble restores the window' ($restored -notmatch '\(168x168\)') $restored
