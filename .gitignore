@@ -6,3 +6,9 @@ release/
 
 local.properties
 github.properties
+
+# Local build/test artefacts (adb screenshots, ui dumps, gradle logs) produced by tools/*.ps1
+build*.log
+*.png
+ui-*.xml
+!app/src/main/res/**/*.png

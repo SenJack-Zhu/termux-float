@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Floating window layout.
+
+  Structure (top to bottom):
+    window_controls   : drag handle + minimize/exit buttons
+    selection_bar     : GONE unless text selection mode is active (copy/copy-all/paste)
+    terminal_view     : the terminal itself, takes all the remaining space
+    extra_keys_view   : two rows of sticky keys (CTRL/ALT/SHIFT/FN) and terminal keys
+
+  The extra keys deliberately sit *below* the terminal: the floating window is shifted and
+  squeezed so that its bottom edge rests just above the soft keyboard (see
+  TermuxFloatView#adjustForIme), which puts these keys right under the terminal and within
+  thumb reach of the keyboard, instead of at the far top of the screen.
+-->
 <com.termux.window.TermuxFloatView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/window_layout"
     android:layout_width="fill_parent"
     android:layout_height="fill_parent"
@@ -10,44 +25,135 @@
     <LinearLayout
         android:id="@+id/window_controls"
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="32dp"
         android:gravity="center_vertical"
-        android:background="#ff333333">
+        android:background="#ff2b2b2b">
+
         <Button
             android:id="@+id/minimize_button"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="6dp"
             android:background="@drawable/ic_minimize_icon"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp" />
-        <Space
+            android:contentDescription="@string/action_minimize" />
+
+        <ImageView
             android:id="@+id/drag_handle"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:contentDescription="@string/drag_handle_description"
+            android:scaleType="center"
+            android:src="@drawable/ic_drag_handle" />
+
         <Button
             android:id="@+id/exit_button"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="6dp"
             android:background="@drawable/ic_exit_icon"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"/>
+            android:contentDescription="@string/action_exit" />
     </LinearLayout>
 
-    <com.termux.shared.termux.extrakeys.ExtraKeysView
-        android:id="@+id/extra_keys_view"
+    <LinearLayout
+        android:id="@+id/selection_bar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#44333333"
-        android:minHeight="36dp" />
+        android:layout_height="34dp"
+        android:background="#ff1565c0"
+        android:gravity="center_vertical"
+        android:visibility="gone" >
+
+        <TextView
+            android:id="@+id/selection_hint"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="6dp"
+            android:text="@string/selection_mode_hint"
+            android:textColor="#ffffffff"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/selection_copy_button"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?android:attr/selectableItemBackground"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/action_copy"
+            android:textColor="#ffffffff"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/selection_copy_all_button"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?android:attr/selectableItemBackground"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/action_copy_all"
+            android:textColor="#ffffffff"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/selection_paste_button"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?android:attr/selectableItemBackground"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/action_paste"
+            android:textColor="#ffffffff"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/selection_close_button"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?android:attr/selectableItemBackground"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="10dp"
+            android:text="@string/action_done"
+            android:textColor="#ffffffff"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <com.termux.view.TerminalView
         android:id="@+id/terminal_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:layout_weight="1"
         android:focusable="true"
         android:focusableInTouchMode="true"
         android:scrollbars="vertical" />
+
+    <!--
+      The extra keys bar is given a real minimum height instead of plain wrap_content: the window
+      is added with WRAP_CONTENT height, and a GridLayout that reports no intrinsic height would
+      otherwise be squeezed to 0 px.
+    -->
+    <com.termux.shared.termux.extrakeys.ExtraKeysView
+        android:id="@+id/extra_keys_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#cc111111"
+        android:minHeight="44dp" />
+
+    <!-- Shown only while the window is collapsed into the bubble. -->
+    <TextView
+        android:id="@+id/bubble_icon"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="@string/bubble_glyph"
+        android:textColor="#ffffffff"
+        android:textSize="26sp"
+        android:visibility="gone" />
 
 </com.termux.window.TermuxFloatView>

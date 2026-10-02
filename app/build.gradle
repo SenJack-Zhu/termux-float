@@ -73,6 +73,10 @@ dependencies {
     implementation "androidx.annotation:annotation:1.9.1"
     implementation "androidx.activity:activity:1.9.3"
 
+    // ExtraKeysView is inflated from the floating window and its Material buttons require an
+    // AppCompat theme (see AppBaseTheme), so appcompat must be on the runtime classpath.
+    implementation "androidx.appcompat:appcompat:1.3.1"
+
     // Material is a runtime-only transitive dep of termux-shared, but ExtraKeysView.IExtraKeysView
     // exposes MaterialButton in its API, so we need it on the compile classpath.
     implementation "com.google.android.material:material:1.4.0"

@@ -13,6 +13,14 @@ allprojects {
     repositories {
         mavenCentral()
         google()
+        // Optional local mirror for termux-shared/terminal-view AARs, used when jitpack.io
+        // cannot be reached (or fails its TLS handshake, as it does through some proxies).
+        // Set TERMUX_FLOAT_LOCAL_REPO to a maven-layout directory to enable it; absent or
+        // missing artifacts fall through to the remote repositories below.
+        def localRepo = System.getenv("TERMUX_FLOAT_LOCAL_REPO")
+        if (localRepo != null && !localRepo.isEmpty()) {
+            maven { url localRepo }
+        }
         //mavenLocal()
         maven { url "https://jitpack.io" }
     }

@@ -6,6 +6,7 @@ import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
+import com.termux.shared.termux.extrakeys.SpecialButton;
 import com.termux.shared.termux.terminal.TermuxTerminalViewClientBase;
 import com.termux.shared.view.KeyboardUtils;
 import com.termux.terminal.KeyHandler;
@@ -83,7 +84,9 @@ public class TermuxFloatViewClient extends TermuxTerminalViewClientBase {
 
     @Override
     public void copyModeChanged(boolean copyMode) {
-
+        // Show/hide the in-window selection bar (see TermuxFloatView#initSelectionBar); the system
+        // text selection toolbar cannot be relied on inside an overlay window.
+        mView.setSelectionBarVisible(copyMode);
     }
 
     @Override
@@ -120,19 +123,42 @@ public class TermuxFloatViewClient extends TermuxTerminalViewClientBase {
     }
 
 
+    /**
+     * Read the state of a special ("sticky") extra keys button, like CTRL, ALT, SHIFT or FN.
+     *
+     * <p>The {@link com.termux.shared.termux.extrakeys.ExtraKeysView} toggles these buttons itself and
+     * does <b>not</b> forward their clicks to {@link com.termux.shared.termux.extrakeys.ExtraKeysView.IExtraKeysView#onExtraKeyButtonClick},
+     * so the state has to be pulled from the view whenever a key or text is processed. This is the
+     * same hook {@code TermuxActivity} uses, and without it CTRL/ALT would silently do nothing for
+     * both soft keyboard input and hardware keys.</p>
+     */
+    private boolean readExtraKeysSpecialButton(SpecialButton specialButton) {
+        return mView.readExtraKeysSpecialButton(specialButton);
+    }
+
     @Override
     public boolean readControlKey() {
-        return mVirtualControlKeyDown;
+        return readExtraKeysSpecialButton(SpecialButton.CTRL) || mVirtualControlKeyDown;
     }
 
     @Override
     public boolean readAltKey() {
-        return false;
+        return readExtraKeysSpecialButton(SpecialButton.ALT);
+    }
+
+    @Override
+    public boolean readShiftKey() {
+        return readExtraKeysSpecialButton(SpecialButton.SHIFT);
+    }
+
+    @Override
+    public boolean readFnKey() {
+        return readExtraKeysSpecialButton(SpecialButton.FN);
     }
 
     @Override
     public boolean onCodePoint(int codePoint, boolean ctrlDown, TerminalSession session) {
-        if (mVirtualFnKeyDown) {
+        if (readFnKey()) {
             int resultingKeyCode = -1;
             int resultingCodePoint = -1;
             boolean altDown = false;

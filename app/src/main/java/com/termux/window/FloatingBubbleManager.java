@@ -1,18 +1,21 @@
 package com.termux.window;
 
-import android.graphics.Outline;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 
 import com.termux.shared.view.ViewUtils;
-import com.termux.view.TerminalView;
 
 /**
  * Handles displaying our TermuxFloatView as a collapsed bubble and restoring back
  * to its original display.
+ *
+ * <p>The bubble is a small circular window that can be dragged around and tapped to restore the
+ * floating terminal. The terminal view itself is made fully transparent while collapsed (rather
+ * than removed) so that the terminal session keeps updating in the background and the window can
+ * be restored without re-attaching it.</p>
  */
 public class FloatingBubbleManager {
     private static final int DEFAULT_BUBBLE_SIZE_DP = 56;
@@ -26,9 +29,11 @@ public class FloatingBubbleManager {
     // from our bubble
     private int mOriginalLayoutWidth;
     private int mOriginalLayoutHeight;
-    private boolean mDidCaptureOriginalValues;
-    private Drawable mOriginalTerminalViewBackground;
     private Drawable mOriginalFloatViewBackground;
+
+    /** The user-chosen window size, i.e. the size before the last minimize. */
+    private int mWindowWidth;
+    private int mWindowHeight;
 
     public FloatingBubbleManager(TermuxFloatView termuxFloatView) {
         mTermuxFloatView = termuxFloatView;
@@ -51,35 +56,54 @@ public class FloatingBubbleManager {
     }
 
     public void displayAsFloatingBubble() {
-        captureOriginalLayoutValues();
-
         WindowManager.LayoutParams layoutParams = getLayoutParams();
+
+        // Remember the window geometry the user set, so restoring does not depend on whichever
+        // values happen to be in the layout params at minimize time.
+        mWindowWidth = layoutParams.width;
+        mWindowHeight = layoutParams.height;
+        mOriginalLayoutWidth = mWindowWidth;
+        mOriginalLayoutHeight = mWindowHeight;
+        mOriginalFloatViewBackground = mTermuxFloatView.getBackground();
 
         layoutParams.width = BUBBLE_SIZE_PX;
         layoutParams.height = BUBBLE_SIZE_PX;
 
-        TerminalView terminalView = getTerminalView();
-        final int strokeWidth = (int) terminalView.getResources().getDimension(R.dimen.bubble_outline_stroke_width);
-        terminalView.setOutlineProvider(new ViewOutlineProvider() {
-            @SuppressWarnings("SuspiciousNameCombination")
-            @Override
-            public void getOutline(View view, Outline outline) {
-                // shrink TerminalView clipping a bit so it doesn't cut off our bubble outline
-                outline.setOval(strokeWidth, strokeWidth, view.getWidth() - strokeWidth, view.getHeight() - strokeWidth);
-            }
-        });
-        terminalView.setClipToOutline(true);
+        // Make the bubble round and opaque. A shape drawable background provides a rectangular
+        // outline, so clipping to it would still look like a square; the circular background
+        // drawable is used for looks while the terminal view is hidden behind it.
+        mTermuxFloatView.setBackgroundResource(R.drawable.round_button_with_outline);
+        mTermuxFloatView.setClipToOutline(true);
 
-        TermuxFloatView termuxFloatView = getTermuxFloatView();
-        termuxFloatView.setBackgroundResource(R.drawable.round_button_with_outline);
-        termuxFloatView.setClipToOutline(true);
-        termuxFloatView.hideTouchKeyboard();
-        termuxFloatView.changeFocus(false);
+        View terminalView = mTermuxFloatView.getTerminalView();
+        if (terminalView != null) {
+            // GONE rather than a transparent view: Android does not deliver touches to a view whose
+            // alpha is 0, so a merely invisible TerminalView would swallow the bubble's taps and the
+            // bubble could never be dragged or restored. The terminal session keeps running, only
+            // its rendering stops while collapsed.
+            terminalView.setAlpha(0f);
+            terminalView.setVisibility(View.GONE);
+        }
 
-        ViewGroup windowControls = termuxFloatView.findViewById(R.id.window_controls);
-        windowControls.setVisibility(View.GONE);
+        // Show a small terminal glyph inside the bubble instead of the hidden terminal.
+        View bubbleIcon = mTermuxFloatView.getBubbleIcon();
+        if (bubbleIcon != null) bubbleIcon.setVisibility(View.VISIBLE);
 
-        getWindowManager().updateViewLayout(termuxFloatView, layoutParams);
+        // The extra keys bar and the control bar have no meaning in a 56 dp bubble, and would be
+        // squeezed into unreadable slivers; hide them while collapsed.
+        ViewGroup windowControls = mTermuxFloatView.findViewById(R.id.window_controls);
+        if (windowControls != null) windowControls.setVisibility(View.GONE);
+
+        View extraKeys = mTermuxFloatView.getExtraKeysView();
+        if (extraKeys != null) extraKeys.setVisibility(View.GONE);
+
+        View selectionBar = mTermuxFloatView.findViewById(R.id.selection_bar);
+        if (selectionBar != null) selectionBar.setVisibility(View.GONE);
+
+        mTermuxFloatView.hideTouchKeyboard();
+        mTermuxFloatView.changeFocus(false);
+
+        getWindowManager().updateViewLayout(mTermuxFloatView, layoutParams);
         mIsMinimized = true;
     }
 
@@ -87,56 +111,111 @@ public class FloatingBubbleManager {
         WindowManager.LayoutParams layoutParams = getLayoutParams();
 
         // restore back to previous values
-        layoutParams.width = mOriginalLayoutWidth;
-        layoutParams.height = mOriginalLayoutHeight;
+        layoutParams.width = mOriginalLayoutWidth > 0 ? mOriginalLayoutWidth : mWindowWidth;
+        layoutParams.height = mOriginalLayoutHeight > 0 ? mOriginalLayoutHeight : mWindowHeight;
 
-        TerminalView terminalView = getTerminalView();
-        terminalView.setBackground(mOriginalTerminalViewBackground);
-        terminalView.setOutlineProvider(null);
-        terminalView.setClipToOutline(false);
+        View terminalView = mTermuxFloatView.getTerminalView();
+        if (terminalView != null) {
+            terminalView.setAlpha(1f);
+            terminalView.setVisibility(View.VISIBLE);
+            terminalView.setClipToOutline(false);
+        }
 
-        TermuxFloatView termuxFloatView = getTermuxFloatView();
-        termuxFloatView.setBackground(mOriginalFloatViewBackground);
-        termuxFloatView.setClipToOutline(false);
+        View bubbleIcon = mTermuxFloatView.getBubbleIcon();
+        if (bubbleIcon != null) bubbleIcon.setVisibility(View.GONE);
 
-        ViewGroup windowControls = termuxFloatView.findViewById(R.id.window_controls);
-        windowControls.setVisibility(View.VISIBLE);
+        mTermuxFloatView.setBackground(mOriginalFloatViewBackground != null
+                ? mOriginalFloatViewBackground
+                : mTermuxFloatView.getResources().getDrawable(R.drawable.floating_window_background));
+        mTermuxFloatView.setClipToOutline(false);
 
-        getWindowManager().updateViewLayout(termuxFloatView, layoutParams);
+        ViewGroup windowControls = mTermuxFloatView.findViewById(R.id.window_controls);
+        if (windowControls != null) windowControls.setVisibility(View.VISIBLE);
+
+        View extraKeys = mTermuxFloatView.getExtraKeysView();
+        if (extraKeys != null) extraKeys.setVisibility(View.VISIBLE);
+
+        getWindowManager().updateViewLayout(mTermuxFloatView, layoutParams);
         mIsMinimized = false;
-
-        // clear so we can capture proper values on next minimize
-        mDidCaptureOriginalValues = false;
     }
 
     public boolean isMinimized() {
         return mIsMinimized;
     }
 
-    private void captureOriginalLayoutValues() {
-        if (!mDidCaptureOriginalValues) {
-            WindowManager.LayoutParams layoutParams = getLayoutParams();
-            mOriginalLayoutWidth = layoutParams.width;
-            mOriginalLayoutHeight = layoutParams.height;
+    /**
+     * Handling for touches while collapsed: drag the bubble around, or restore the window on tap.
+     *
+     * @return {@code true} if the gesture was handled by the bubble.
+     */
+    public boolean handleBubbleTouch(android.view.MotionEvent event) {
+        WindowManager.LayoutParams layoutParams = getLayoutParams();
+        switch (event.getAction()) {
+            case android.view.MotionEvent.ACTION_DOWN:
+                mDragStartRawX = event.getRawX();
+                mDragStartRawY = event.getRawY();
+                mDragStartX = layoutParams.x;
+                mDragStartY = layoutParams.y;
+                mDragged = false;
+                return true;
+            case android.view.MotionEvent.ACTION_MOVE: {
+                int dx = (int) (event.getRawX() - mDragStartRawX);
+                int dy = (int) (event.getRawY() - mDragStartRawY);
+                if (Math.abs(dx) > mTouchSlop || Math.abs(dy) > mTouchSlop) mDragged = true;
+                if (!mDragged) return true;
 
-            mOriginalTerminalViewBackground = getTerminalView().getBackground();
-            mOriginalFloatViewBackground = getTermuxFloatView().getBackground();
-            mDidCaptureOriginalValues = true;
+                Rect bounds = getDisplayBounds();
+                layoutParams.x = Math.min(Math.max(bounds.left, mDragStartX + dx), Math.max(bounds.left, bounds.right - layoutParams.width));
+                layoutParams.y = Math.min(Math.max(bounds.top, mDragStartY + dy), Math.max(bounds.top, bounds.bottom - layoutParams.height));
+                getWindowManager().updateViewLayout(mTermuxFloatView, layoutParams);
+                return true;
+            }
+            case android.view.MotionEvent.ACTION_UP:
+                if (mDragged) {
+                    // Keep the new position so the bubble stays where it was dropped.
+                    if (mTermuxFloatView.getPreferences() != null) {
+                        mTermuxFloatView.getPreferences().setWindowX(layoutParams.x);
+                        mTermuxFloatView.getPreferences().setWindowY(layoutParams.y);
+                    }
+                    mTermuxFloatView.setBaseWindowPosition(layoutParams.x, layoutParams.y);
+                } else {
+                    displayAsFloatingWindow();
+                    mTermuxFloatView.changeFocus(true);
+                    mTermuxFloatView.showTouchKeyboard();
+                }
+                return true;
+            case android.view.MotionEvent.ACTION_CANCEL:
+                return true;
         }
+        return false;
+    }
+
+    private float mDragStartRawX, mDragStartRawY;
+    private int mDragStartX, mDragStartY;
+    private boolean mDragged;
+    private static final int mTouchSlop = 16;
+
+    private Rect getDisplayBounds() {
+        Rect bounds = new Rect(0, 0, 0, 0);
+        WindowManager wm = getWindowManager();
+        if (wm != null) {
+            android.util.DisplayMetrics metrics = mTermuxFloatView.getResources().getDisplayMetrics();
+            bounds.set(0, 0, metrics.widthPixels, metrics.heightPixels);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && wm.getCurrentWindowMetrics() != null) {
+                Rect wmBounds = wm.getCurrentWindowMetrics().getBounds();
+                if (wmBounds.width() > 0) bounds.set(wmBounds);
+            }
+        }
+        return bounds;
     }
 
     public void cleanup() {
         mTermuxFloatView = null;
         mOriginalFloatViewBackground = null;
-        mOriginalTerminalViewBackground = null;
     }
 
     private TermuxFloatView getTermuxFloatView() {
         return mTermuxFloatView;
-    }
-
-    private TerminalView getTerminalView() {
-        return mTermuxFloatView.getTerminalView();
     }
 
     private WindowManager getWindowManager() {

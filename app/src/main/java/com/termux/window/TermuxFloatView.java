@@ -9,6 +9,8 @@ import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -16,7 +18,9 @@ import android.view.ScaleGestureDetector;
 import android.view.ScaleGestureDetector.OnScaleGestureListener;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 
@@ -27,9 +31,11 @@ import com.termux.shared.termux.extrakeys.ExtraKeyButton;
 import com.termux.shared.termux.extrakeys.ExtraKeysConstants;
 import com.termux.shared.termux.extrakeys.ExtraKeysInfo;
 import com.termux.shared.termux.extrakeys.ExtraKeysView;
+import com.termux.shared.termux.extrakeys.SpecialButton;
 import com.termux.shared.termux.settings.preferences.TermuxFloatAppSharedPreferences;
 import com.termux.shared.termux.terminal.io.TerminalExtraKeys;
 import com.termux.shared.view.KeyboardUtils;
+import com.termux.terminal.TerminalEmulator;
 import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
@@ -42,6 +48,70 @@ public class TermuxFloatView extends LinearLayout {
     public static final float ALPHA_NOT_FOCUS = 0.7f;
     public static final float ALPHA_MOVING = 0.5f;
 
+    /**
+     * Extra keys layout: two rows of 14 keys, so the whole bar stays about as tall as the soft
+     * keyboard's suggestion strip while covering the keys that are painful to type on a phone.
+     *
+     * Sticky keys (state toggled by ExtraKeysView itself and read through
+     * {@link #readExtraKeysSpecialButton(SpecialButton)}): CTRL, ALT, SHIFT, FN.
+     * Handled by {@link FloatExtraKeysClient}: CPY, PSTE, KBRD, ALL, and the 0xNN control
+     * code points (0x03 = Ctrl-C, 0x04 = Ctrl-D, 0x0c = Ctrl-L, 0x1a = Ctrl-Z).
+     *
+     * Displays are kept to 2-4 characters because a 14 column bar on a 1080 px wide window gives
+     * roughly 74 px per key.
+     */
+    private static final String EXTRA_KEYS_CONFIG =
+            "[[" +
+                    "{key: \"ESC\", display: \"ESC\"}," +
+                    "{key: \"TAB\", display: \"TAB\"}," +
+                    "{key: \"CTRL\", display: \"CTL\"}," +
+                    "{key: \"ALT\", display: \"ALT\"}," +
+                    "{key: \"SHIFT\", display: \"SHF\"}," +
+                    "{key: \"FN\", display: \"FN\"}," +
+                    "{key: \"LEFT\", display: \"<\"}," +
+                    "{key: \"DOWN\", display: \"v\"}," +
+                    "{key: \"UP\", display: \"^\"}," +
+                    "{key: \"RIGHT\", display: \">\"}" +
+                    "],[" +
+                    "{key: \"PGUP\", display: \"PG^\"}," +
+                    "{key: \"PGDN\", display: \"PGv\"}," +
+                    "{key: \"HOME\", display: \"HOM\"}," +
+                    "{key: \"END\", display: \"END\"}," +
+                    "{key: \"/\", display: \"/\"}," +
+                    "{key: \"-\", display: \"-\"}," +
+                    "{key: \"|\", display: \"|\"}," +
+                    "{key: \"~\", display: \"~\"}," +
+                    "{key: \"KBRD\", display: \"KBD\"}," +
+                    "{key: \"CPY\", display: \"CPY\"}," +
+                    "{key: \"PSTE\", display: \"PST\"}," +
+                    "{key: \"ALL\", display: \"ALL\"}," +
+                    "{key: \"0x03\", display: \"^C\"}," +
+                    "{key: \"0x04\", display: \"^D\"}," +
+                    "{key: \"0x0c\", display: \"^L\"}," +
+                    "{key: \"0x1a\", display: \"^Z\"}" +
+                    "]]";
+
+    /** Text size (in px, i.e. the terminal font size) used for the extra keys labels. */
+    private static final int EXTRA_KEYS_LABEL_SIZE_PX = 24;
+
+    /** Minimum window width/height in px when pinch-resizing. */
+    private static final int MIN_WINDOW_SIZE = 180;
+    /** Minimum window height in px to keep the keyboard-shifted window usable. */
+    private static final int MIN_IME_WINDOW_HEIGHT = 220;
+    /** Fraction of the display height above which a system window is assumed to be the IME. */
+    private static final float IME_MIN_FRACTION = 0.15f;
+    /**
+     * Extra clearance (px) kept above the IME.
+     *
+     * <p>The value reported by {@code getWindowVisibleDisplayFrame()} describes the IME window, but
+     * most third party keyboards draw an additional toolbar (clipboard/emoji/suggestion row) as a
+     * separate window that still overlaps the floating window. Without this margin the bottom
+     * hotkey row ends up underneath that toolbar and cannot be tapped.</p>
+     */
+    private static final int IME_CLEARANCE_PX = 110;
+
+    private static final String LOG_TAG = "TermuxFloatView";
+
     private int DISPLAY_WIDTH, DISPLAY_HEIGHT;
 
     final WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams();
@@ -50,6 +120,7 @@ public class TermuxFloatView extends LinearLayout {
     private TerminalView mTerminalView;
     private ExtraKeysView mExtraKeysView;
     ViewGroup mWindowControls;
+    private View mSelectionBar;
     FloatingBubbleManager mFloatingBubbleManager;
 
     /**
@@ -86,11 +157,7 @@ public class TermuxFloatView extends LinearLayout {
 
     final int[] windowControlsLocation = new int[2];
 
-    private static final String LOG_TAG = "TermuxFloatView";
-
     final ScaleGestureDetector mScaleDetector = new ScaleGestureDetector(getContext(), new OnScaleGestureListener() {
-        private static final int MIN_SIZE = 50;
-
         @Override
         public boolean onScaleBegin(ScaleGestureDetector detector) {
             return true;
@@ -100,10 +167,8 @@ public class TermuxFloatView extends LinearLayout {
         public boolean onScale(ScaleGestureDetector detector) {
             int widthChange = (int) (detector.getCurrentSpanX() - detector.getPreviousSpanX());
             int heightChange = (int) (detector.getCurrentSpanY() - detector.getPreviousSpanY());
-            layoutParams.width += widthChange;
-            layoutParams.height += heightChange;
-            layoutParams.width = Math.max(MIN_SIZE, layoutParams.width);
-            layoutParams.height = Math.max(MIN_SIZE, layoutParams.height);
+            layoutParams.width = Math.max(MIN_WINDOW_SIZE, layoutParams.width + widthChange);
+            layoutParams.height = Math.max(getMinWindowHeight(), layoutParams.height + heightChange);
             mWindowManager.updateViewLayout(TermuxFloatView.this, layoutParams);
             if (mPreferences != null) {
                 mPreferences.setWindowWidth(layoutParams.width);
@@ -114,13 +179,30 @@ public class TermuxFloatView extends LinearLayout {
 
         @Override
         public void onScaleEnd(ScaleGestureDetector detector) {
-            // Do nothing.
+            // Persist the final size once the gesture is over.
+            if (mPreferences != null) {
+                mPreferences.setWindowWidth(layoutParams.width);
+                mPreferences.setWindowHeight(layoutParams.height);
+            }
         }
     });
+
+    /** Keyboard (IME) handling. */
+    private ViewTreeObserver.OnGlobalLayoutListener mGlobalLayoutListener;
+    private boolean mImeVisible;
+    private int mImeShift;              // px the window was shifted up because of the IME
+    private int mBaseWindowY;           // window y as set by the user (without the IME shift)
+    private int mBaseWindowHeight;      // window height as set by the user (without IME squeeze)
+    private boolean mAdjustingWindow;   // guards against reacting to our own layout changes
+
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
 
     public TermuxFloatView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setAlpha(ALPHA_FOCUS);
+        // Required so that View#onTouchEvent() handles gestures that are not consumed by a child:
+        // the collapsed bubble and the drag/resize gestures rely on it.
+        setClickable(true);
     }
 
     private static int computeLayoutFlags(boolean withFocus) {
@@ -134,8 +216,6 @@ public class TermuxFloatView extends LinearLayout {
     }
 
     public boolean initFloatView(TermuxFloatService service) {
-        android.util.Log.e(LOG_TAG, "initFloatView START");
-
         // Load termux shared properties
         mProperties = new TermuxFloatAppSharedProperties(getContext());
 
@@ -143,10 +223,9 @@ public class TermuxFloatView extends LinearLayout {
         // This will also fail if TermuxConstants.TERMUX_FLOAT_PACKAGE_NAME does not equal applicationId
         mPreferences = TermuxFloatAppSharedPreferences.build(getContext(), true);
         if (mPreferences == null) {
-            android.util.Log.e(LOG_TAG, "initFloatView: mPreferences is NULL, aborting");
+            Logger.logError(LOG_TAG, "initFloatView: mPreferences is null, aborting");
             return false;
         }
-        android.util.Log.e(LOG_TAG, "initFloatView: mPreferences OK, fontSize=" + mPreferences.getFontSize());
 
         mTermuxFloatSessionClient = new TermuxFloatSessionClient(service, this);
 
@@ -157,17 +236,19 @@ public class TermuxFloatView extends LinearLayout {
 
         // Set up the extra keys bar (Ctrl, Alt, Esc, arrows, etc.)
         mExtraKeysView = findViewById(R.id.extra_keys_view);
-        android.util.Log.e(LOG_TAG, "initFloatView: mExtraKeysView=" + mExtraKeysView);
         if (mExtraKeysView != null) {
             mExtraKeysView.setExtraKeysViewClient(new FloatExtraKeysClient(mTerminalView));
-            // Delay reload until after layout so GridLayout has a measured width
+            // Delay reload until after layout so GridLayout has a measured width.
             mExtraKeysView.post(this::setupExtraKeys);
         }
 
-        mFloatingBubbleManager = new FloatingBubbleManager(this);
         initWindowControls();
+        initSelectionBar();
 
-        android.util.Log.e(LOG_TAG, "initFloatView DONE");
+        mFloatingBubbleManager = new FloatingBubbleManager(this);
+
+        installKeyboardListener();
+
         return true;
     }
 
@@ -175,40 +256,95 @@ public class TermuxFloatView extends LinearLayout {
         mWindowControls = findViewById(R.id.window_controls);
         mWindowControls.setOnClickListener(v -> changeFocus(true));
 
-        Button minimizeButton = findViewById(R.id.minimize_button);
-        minimizeButton.setOnClickListener(v -> mFloatingBubbleManager.toggleBubble());
+        View minimizeButton = findViewById(R.id.minimize_button);
+        if (minimizeButton != null)
+            minimizeButton.setOnClickListener(v -> mFloatingBubbleManager.toggleBubble());
 
-        Button exitButton = findViewById(R.id.exit_button);
-        exitButton.setOnClickListener(v -> exit());
+        View exitButton = findViewById(R.id.exit_button);
+        if (exitButton != null)
+            exitButton.setOnClickListener(v -> exit());
     }
 
     /**
-     * Configure the extra keys bar with a default set of useful keys.
-     * Row 1: ESC, TAB, CTRL, ALT, FN, HOME, END
-     * Row 2: LEFT, DOWN, UP, RIGHT, COPY, PASTE, /, -
+     * The in-window text selection bar.
      *
-     * COPY/PASTE are handled specially in {@link FloatExtraKeysClient} because the
-     * system floating action-mode toolbar (copy menu) is unreliable inside a
-     * TYPE_APPLICATION_OVERLAY window.
+     * <p>The system text selection {@code ActionMode} toolbar is unreliable inside a
+     * {@code TYPE_APPLICATION_OVERLAY} window, so copy/paste must not depend on it. Long pressing
+     * the terminal still starts the terminal's own selection mode (with its drag handles), and the
+     * matching {@code copyModeChanged()} callback shows this bar, whose buttons act on the
+     * selection directly.</p>
+     */
+    private void initSelectionBar() {
+        mSelectionBar = findViewById(R.id.selection_bar);
+        if (mSelectionBar == null) return;
+
+        View copy = findViewById(R.id.selection_copy_button);
+        if (copy != null) copy.setOnClickListener(v -> copySelectedText());
+
+        View copyAll = findViewById(R.id.selection_copy_all_button);
+        if (copyAll != null) copyAll.setOnClickListener(v -> copyAllText());
+
+        View paste = findViewById(R.id.selection_paste_button);
+        if (paste != null) paste.setOnClickListener(v -> {
+            pasteFromClipboard();
+            setSelectionBarVisible(false);
+        });
+
+        View done = findViewById(R.id.selection_close_button);
+        if (done != null) done.setOnClickListener(v -> endSelectionMode());
+    }
+
+    /**
+     * Configure the extra keys bar with the key set defined by {@link #EXTRA_KEYS_CONFIG}.
      */
     private void setupExtraKeys() {
+        if (mExtraKeysView == null || mPreferences == null) return;
         try {
-            String extraKeysConfig = "[[\"ESC\",\"TAB\",\"CTRL\",\"ALT\",\"FN\",\"HOME\",\"END\"]," +
-                    "[\"LEFT\",\"DOWN\",\"UP\",\"RIGHT\",\"COPY\",\"PASTE\",\"/\",\"-\"]]";
-            ExtraKeysInfo extraKeysInfo = new ExtraKeysInfo(extraKeysConfig,
+            ExtraKeysInfo extraKeysInfo = new ExtraKeysInfo(EXTRA_KEYS_CONFIG,
                     "default",
                     ExtraKeysConstants.CONTROL_CHARS_ALIASES);
-            android.util.Log.e(LOG_TAG, "setupExtraKeys: fontSize=" + mPreferences.getFontSize() + ", matrix rows=" + extraKeysInfo.getMatrix().length);
             mExtraKeysView.reload(extraKeysInfo, mPreferences.getFontSize());
-            android.util.Log.e(LOG_TAG, "setupExtraKeys: reload done, childCount=" + mExtraKeysView.getChildCount());
+            shrinkExtraKeysLabels();
+            mExtraKeysView.setVisibility(View.VISIBLE);
         } catch (Exception e) {
-            android.util.Log.e(LOG_TAG, "setupExtraKeys FAILED: " + e.getMessage(), e);
+            // Never let a broken extra keys config take the whole floating window down.
+            Logger.logStackTraceWithMessage(LOG_TAG, "setupExtraKeys failed, hiding extra keys bar", e);
+            mExtraKeysView.setVisibility(View.GONE);
         }
     }
 
     /**
+     * Force a smaller label size on the extra keys than the terminal font size.
+     *
+     * <p>{@link ExtraKeysView#reload} sizes its buttons from the value it is given (the terminal
+     * font size, 36 px here), which makes the labels overflow their ~74 px wide buttons.</p>
+     */
+    private void shrinkExtraKeysLabels() {
+        if (mExtraKeysView == null) return;
+        for (int i = 0; i < mExtraKeysView.getChildCount(); i++) {
+            View child = mExtraKeysView.getChildAt(i);
+            if (child instanceof android.widget.TextView) {
+                ((android.widget.TextView) child).setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                        EXTRA_KEYS_LABEL_SIZE_PX);
+            }
+        }
+    }
+
+    /**
+     * Read the current state of a sticky extra keys button (CTRL/ALT/SHIFT/FN).
+     *
+     * <p>Required by {@link TermuxFloatViewClient} so that the sticky keys also apply to soft
+     * keyboard input and hardware keys, exactly like the main Termux app does.</p>
+     */
+    public boolean readExtraKeysSpecialButton(SpecialButton specialButton) {
+        if (mExtraKeysView == null) return false;
+        Boolean state = mExtraKeysView.readSpecialButton(specialButton, true);
+        return state != null && state;
+    }
+
+    /**
      * Custom extra-keys client that delegates normal keys to {@link TerminalExtraKeys}
-     * but intercepts COPY and PASTE to handle them directly, since the system's
+     * but intercepts the clipboard/keyboard keys to handle them directly, since the system's
      * text-selection action-mode toolbar may not appear inside an overlay window.
      */
     private class FloatExtraKeysClient implements ExtraKeysView.IExtraKeysView {
@@ -222,12 +358,26 @@ public class TermuxFloatView extends LinearLayout {
         public void onExtraKeyButtonClick(View view, ExtraKeyButton button, MaterialButton materialButton) {
             if (button == null) return;
             String key = button.getKey();
-            if ("COPY".equalsIgnoreCase(key)) {
+            if (key == null) return;
+
+            if ("CPY".equalsIgnoreCase(key)) {
                 copySelectedText();
                 return;
             }
-            if ("PASTE".equalsIgnoreCase(key)) {
+            if ("ALL".equalsIgnoreCase(key)) {
+                copyAllText();
+                return;
+            }
+            if ("PSTE".equalsIgnoreCase(key)) {
                 pasteFromClipboard();
+                return;
+            }
+            if ("KBRD".equalsIgnoreCase(key)) {
+                toggleSoftKeyboard();
+                return;
+            }
+            if (key.startsWith("0x") || key.startsWith("0X")) {
+                sendControlCode(key);
                 return;
             }
             mDelegate.onExtraKeyButtonClick(view, button, materialButton);
@@ -239,40 +389,152 @@ public class TermuxFloatView extends LinearLayout {
         }
     }
 
-    /** Copy the currently selected terminal text to the clipboard. */
+    /** Send a raw code point such as 0x03 (Ctrl-C) to the current session. */
+    private void sendControlCode(String key) {
+        try {
+            int codePoint = Integer.parseInt(key.substring(2), 16);
+            TerminalSession session = mTerminalView.getCurrentSession();
+            if (session != null) session.write(new String(Character.toChars(codePoint)));
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "sendControlCode failed for " + key, e);
+        }
+    }
+
+    /** Copy the currently selected terminal text, or the whole visible screen when nothing is selected. */
     private void copySelectedText() {
         try {
             String selected = mTerminalView.getSelectedText();
             if (selected == null || selected.isEmpty()) {
-                Logger.showToast(getContext(), getContext().getString(R.string.no_text_selected), false);
+                // Fall back to the visible screen; an empty clipboard is the most common complaint.
+                copyAllText();
                 return;
             }
-            ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("termux-float", selected));
-                Logger.showToast(getContext(), getContext().getString(R.string.text_copied), false);
-            }
+            setClipboard(selected);
+            Logger.showToast(getContext(), getContext().getString(R.string.text_copied), false);
+            endSelectionMode();
         } catch (Exception e) {
-            android.util.Log.e(LOG_TAG, "copySelectedText failed: " + e.getMessage());
+            Logger.logStackTraceWithMessage(LOG_TAG, "copySelectedText failed", e);
         }
     }
 
-    /** Paste clipboard content into the terminal session. */
+    /** Copy the whole terminal screen (scrollback included) to the clipboard. */
+    private void copyAllText() {
+        try {
+            String text = getTerminalText();
+            if (text == null || text.trim().isEmpty()) {
+                Logger.showToast(getContext(), getContext().getString(R.string.nothing_to_copy), false);
+                return;
+            }
+            setClipboard(text);
+            Logger.showToast(getContext(), getContext().getString(R.string.text_copied), false);
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "copyAllText failed", e);
+        }
+    }
+
+    private void setClipboard(String text) {
+        ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("termux-float", text));
+    }
+
+    /** Read the selection if selecting, otherwise the whole terminal screen. */
+    private String getTerminalText() {
+        if (mTerminalView == null) return null;
+        String selected = mTerminalView.getSelectedText();
+        if (selected != null && !selected.isEmpty()) return selected;
+        // getSelectedText() only returns something while selection mode is active; the stored text
+        // survives a trip through the "MORE" context menu.
+        String stored = mTerminalView.getStoredSelectedText();
+        if (stored != null && !stored.isEmpty()) return stored;
+        return getScreenText();
+    }
+
+    /**
+     * Extract everything currently on the terminal screen (visible rows, scrollback included).
+     *
+     * <p>{@code TerminalView.getText()} is private, so this rebuilds the same string through the
+     * public {@code TerminalEmulator}/{@code TerminalBuffer} API, but trims the trailing blank
+     * space that the fixed-width screen buffer is padded with.</p>
+     */
+    private String getScreenText() {
+        try {
+            TerminalEmulator emulator = mTerminalView.mEmulator;
+            if (emulator == null || emulator.getScreen() == null) return null;
+            String screen = emulator.getScreen().getSelectedText(0, 0, emulator.mColumns, emulator.mRows);
+            if (screen == null) return null;
+            StringBuilder sb = new StringBuilder();
+            for (String line : screen.split("\n", -1)) {
+                sb.append(line.replaceAll("\\s+$", "")).append('\n');
+            }
+            // Drop trailing empty lines.
+            return sb.toString().replaceAll("\\s+$", "");
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "getScreenText failed", e);
+            return null;
+        }
+    }
+
+    /**
+     * Paste clipboard content into the terminal session.
+     *
+     * <p>Multi-line clipboard content is flattened to a single line first: pasting raw newlines
+     * into a shell runs every line immediately, which is almost never what was intended when
+     * pasting a snippet into a floating window.</p>
+     */
     private void pasteFromClipboard() {
         try {
-            ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm == null || !cm.hasPrimaryClip()) return;
-            ClipData clip = cm.getPrimaryClip();
-            if (clip == null || clip.getItemCount() == 0) return;
-            CharSequence text = clip.getItemAt(0).coerceToText(getContext());
-            if (text == null) return;
-            TerminalSession session = mTerminalView.getCurrentSession();
-            if (session != null) {
-                session.write(text.toString());
+            String text = getClipboardText();
+            if (text == null || text.isEmpty()) {
+                Logger.showToast(getContext(), getContext().getString(R.string.clipboard_empty), false);
+                return;
+            }
+            String singleLine = toSingleLine(text);
+            TerminalEmulator emulator = mTerminalView.mEmulator;
+            if (emulator != null) {
+                emulator.paste(singleLine);
+            } else {
+                TerminalSession session = mTerminalView.getCurrentSession();
+                if (session != null) session.write(singleLine);
             }
         } catch (Exception e) {
-            android.util.Log.e(LOG_TAG, "pasteFromClipboard failed: " + e.getMessage());
+            Logger.logStackTraceWithMessage(LOG_TAG, "pasteFromClipboard failed", e);
         }
+    }
+
+    private String getClipboardText() {
+        ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null || !cm.hasPrimaryClip()) return null;
+        ClipData clip = cm.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) return null;
+        CharSequence text = clip.getItemAt(0).coerceToText(getContext());
+        return text == null ? null : text.toString();
+    }
+
+    private static String toSingleLine(String text) {
+        if (text == null) return null;
+        if (text.indexOf('\n') < 0 && text.indexOf('\r') < 0) return text;
+        return text.replace("\r\n", " ").replace('\r', ' ').replace('\n', ' ');
+    }
+
+    /** Show/hide the in-window selection bar (called from {@link TermuxFloatViewClient}). */
+    void setSelectionBarVisible(boolean visible) {
+        if (mSelectionBar == null) return;
+        // Make sure it is applied on the UI thread even if the callback came from another thread.
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            mSelectionBar.setVisibility(visible ? View.VISIBLE : View.GONE);
+        } else {
+            mHandler.post(() -> mSelectionBar.setVisibility(visible ? View.VISIBLE : View.GONE));
+        }
+    }
+
+    /** Leave the terminal's text selection mode and hide the selection bar. */
+    private void endSelectionMode() {
+        try {
+            mTerminalView.stopTextSelectionMode();
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "endSelectionMode failed", e);
+        }
+        setSelectionBarVisible(false);
     }
 
     /** Reload extra keys after font size change so they scale together. */
@@ -296,6 +558,7 @@ public class TermuxFloatView extends LinearLayout {
         super.onConfigurationChanged(newConfig);
         // Refresh display dimensions when screen rotates or font scale changes
         updateDisplaySize();
+        if (mExtraKeysView != null) mExtraKeysView.post(this::setupExtraKeys);
     }
 
     /** Update DISPLAY_WIDTH and DISPLAY_HEIGHT using a non-deprecated API. */
@@ -317,16 +580,15 @@ public class TermuxFloatView extends LinearLayout {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
 
+        removeKeyboardListener();
+
         if (mTermuxFloatSessionClient != null)
             mTermuxFloatSessionClient.onDetachedFromWindow();
     }
 
     @SuppressLint("RtlHardcoded")
     public void launchFloatingWindow() {
-        int widthAndHeight = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
         layoutParams.flags = computeLayoutFlags(true);
-        layoutParams.width = widthAndHeight;
-        layoutParams.height = widthAndHeight;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             layoutParams.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
         } else {
@@ -336,25 +598,38 @@ public class TermuxFloatView extends LinearLayout {
 
         layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
 
+        int width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        int height = ViewGroup.LayoutParams.WRAP_CONTENT;
         if (mPreferences != null) {
             layoutParams.x = mPreferences.getWindowX();
             layoutParams.y = mPreferences.getWindowY();
             int w = mPreferences.getWindowWidth();
             int h = mPreferences.getWindowHeight();
-            // If using the library default (500x500), scale to a sensible fraction of the screen
+            // If using the library default (500x500), scale to a sensible fraction of the screen.
+            // Otherwise keep the saved size, only clamping it to the current display.
             if (w <= 500 && h <= 500) {
                 android.util.DisplayMetrics dm = getContext().getResources().getDisplayMetrics();
-                w = (int) (dm.widthPixels * 0.85f);
-                h = (int) (dm.heightPixels * 0.55f);
+                w = (int) (dm.widthPixels * 0.9f);
+                h = (int) (dm.heightPixels * 0.45f);
             }
-            layoutParams.width = w;
-            layoutParams.height = h;
+            width = Math.min(Math.max(MIN_WINDOW_SIZE, w), DISPLAY_WIDTH > 0 ? DISPLAY_WIDTH : w);
+            height = Math.min(Math.max(getMinWindowHeight(), h), DISPLAY_HEIGHT > 0 ? DISPLAY_HEIGHT : h);
         }
+        layoutParams.width = width;
+        layoutParams.height = height;
+
+        mBaseWindowY = layoutParams.y;
+        mBaseWindowHeight = layoutParams.height;
 
         mWindowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
         if (getWindowToken() == null)
             mWindowManager.addView(this, layoutParams);
         showTouchKeyboard();
+    }
+
+    /** Smallest allowed window height; also accounts for the space reserved for the IME. */
+    private int getMinWindowHeight() {
+        return mImeVisible ? Math.max(MIN_IME_WINDOW_HEIGHT, mImeShift + 80) : MIN_WINDOW_SIZE;
     }
 
     private boolean isResizing;
@@ -374,14 +649,11 @@ public class TermuxFloatView extends LinearLayout {
         // If currently dragging or resizing, keep owning the gesture.
         if (isInLongPressState || isResizing) return true;
 
-        // Minimized bubble: any tap restores the floating window.
+        // Minimized bubble: handled in onTouchEvent(). It must not be consumed here, because a
+        // window that intercepts from ACTION_DOWN receives all following events of the gesture in
+        // onTouchEvent() and the tap/drag would never see its ACTION_UP.
         if (mFloatingBubbleManager != null && mFloatingBubbleManager.isMinimized()) {
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                mFloatingBubbleManager.displayAsFloatingWindow();
-                changeFocus(true);
-                showTouchKeyboard();
-            }
-            return true;
+            return false;
         }
 
         float touchX = event.getRawX();
@@ -413,7 +685,7 @@ public class TermuxFloatView extends LinearLayout {
             getLocationOnScreen(location);
             boolean clickedInside = (touchX >= location[0] && touchX <= location[0] + layoutParams.width)
                     && (touchY >= location[1] && touchY <= location[1] + layoutParams.height);
-            if (clickedInside && !didClickInsideWindowControls(touchX, touchY)) {
+            if (clickedInside && !didClickInsideWindowControls(touchX, touchY) && !didClickInsideSelectionBar(touchX, touchY)) {
                 changeFocus(true);
                 showTouchKeyboard();
             }
@@ -449,20 +721,62 @@ public class TermuxFloatView extends LinearLayout {
                 (touchY >= controlsY && touchY <= controlsY + mWindowControls.getHeight());
     }
 
-    void showTouchKeyboard() {
-        mTerminalView.post(() -> KeyboardUtils.showSoftKeyboard(getContext(), mTerminalView));
+    private boolean didClickInsideSelectionBar(float touchX, float touchY) {
+        if (mSelectionBar == null || mSelectionBar.getVisibility() != View.VISIBLE) return false;
+        int[] barLoc = new int[2];
+        mSelectionBar.getLocationOnScreen(barLoc);
+        return (touchX >= barLoc[0] && touchX <= barLoc[0] + mSelectionBar.getWidth()) &&
+                (touchY >= barLoc[1] && touchY <= barLoc[1] + mSelectionBar.getHeight());
+    }
 
+    void showTouchKeyboard() {
+        if (mTerminalView == null) return;
+        mTerminalView.post(() -> KeyboardUtils.showSoftKeyboard(getContext(), mTerminalView));
     }
 
     void hideTouchKeyboard() {
+        if (mTerminalView == null) return;
         mTerminalView.post(() -> KeyboardUtils.hideSoftKeyboard(getContext(), mTerminalView));
+    }
+
+    /**
+     * Show or hide the soft keyboard.
+     *
+     * <p>{@code KeyboardUtils.toggleSoftKeyboard()} from termux-shared does not work reliably from
+     * an overlay window, so this checks the real IME state (tracked by the global layout listener)
+     * and calls the appropriate {@link InputMethodManager} method directly.</p>
+     */
+    void toggleSoftKeyboard() {
+        try {
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            if (mImeVisible) {
+                // An overlay window has no IME-accepting window token, so hideSoftInputFromWindow()
+                // is silently ignored by most keyboards. Toggling with SHOW_FORCED does close an
+                // already visible keyboard, and on the rare keyboard where it does not, hiding the
+                // system keyboard with the back key still works.
+                imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
+            } else {
+                mTerminalView.requestFocus();
+                imm.showSoftInput(mTerminalView, InputMethodManager.SHOW_IMPLICIT);
+                // Some keyboards ignore SHOW_IMPLICIT for an overlay window; force it as a fallback.
+                mHandler.postDelayed(() -> {
+                    if (!mImeVisible) {
+                        imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
+                    }
+                }, 400);
+            }
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "toggleSoftKeyboard failed", e);
+        }
     }
 
     void updateLongPressMode(boolean newValue) {
         isInLongPressState = newValue;
-        mFloatingBubbleManager.updateLongPressBackgroundResource(isInLongPressState);
+        if (mFloatingBubbleManager != null)
+            mFloatingBubbleManager.updateLongPressBackgroundResource(isInLongPressState);
         setAlpha(newValue ? ALPHA_MOVING : (withFocus ? ALPHA_FOCUS : ALPHA_NOT_FOCUS));
-        if (newValue && !mFloatingBubbleManager.isMinimized())
+        if (newValue && mFloatingBubbleManager != null && !mFloatingBubbleManager.isMinimized())
             Logger.showToast(getContext(), getContext().getString(R.string.after_long_press), false);
     }
 
@@ -472,6 +786,11 @@ public class TermuxFloatView extends LinearLayout {
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        // Minimized bubble: drag it around, or tap to restore the floating window.
+        if (mFloatingBubbleManager != null && mFloatingBubbleManager.isMinimized()) {
+            return mFloatingBubbleManager.handleBubbleTouch(event);
+        }
+
         if (isResizing) {
             mScaleDetector.onTouchEvent(event);
             if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
@@ -486,17 +805,22 @@ public class TermuxFloatView extends LinearLayout {
             if (mScaleDetector.isInProgress()) return true;
             switch (event.getAction()) {
                 case MotionEvent.ACTION_MOVE:
-                    layoutParams.x = Math.min(DISPLAY_WIDTH - layoutParams.width, Math.max(0, initialX + (int) (event.getRawX() - initialTouchX)));
-                    layoutParams.y = Math.min(DISPLAY_HEIGHT - layoutParams.height, Math.max(0, initialY + (int) (event.getRawY() - initialTouchY)));
+                    layoutParams.x = Math.min(Math.max(0, DISPLAY_WIDTH - layoutParams.width), Math.max(0, initialX + (int) (event.getRawX() - initialTouchX)));
+                    layoutParams.y = Math.min(Math.max(0, DISPLAY_HEIGHT - layoutParams.height), Math.max(0, initialY + (int) (event.getRawY() - initialTouchY)));
                     mWindowManager.updateViewLayout(TermuxFloatView.this, layoutParams);
+                    // The user moved the window: remember both the raw position and the shifted one.
                     if (mPreferences != null) {
                         mPreferences.setWindowX(layoutParams.x);
-                        mPreferences.setWindowY(layoutParams.y);
+                        mPreferences.setWindowY(mImeVisible ? Math.max(0, layoutParams.y - mImeShift) : layoutParams.y);
                     }
+                    mBaseWindowY = mImeVisible ? layoutParams.y - mImeShift : layoutParams.y;
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     updateLongPressMode(false);
+                    // Re-apply the IME shift for the new base position.
+                    mBaseWindowHeight = mImeVisible ? Math.max(MIN_WINDOW_SIZE, layoutParams.height + mImeShift) : layoutParams.height;
+                    if (mImeVisible) adjustForIme(true);
                     break;
             }
             return true;
@@ -508,7 +832,7 @@ public class TermuxFloatView extends LinearLayout {
      * Visually indicate focus and show the soft input as needed.
      */
     void changeFocus(boolean newFocus) {
-        if (newFocus && mFloatingBubbleManager.isMinimized()) {
+        if (mFloatingBubbleManager != null && mFloatingBubbleManager.isMinimized()) {
             mFloatingBubbleManager.displayAsFloatingWindow();
         }
         if (newFocus == withFocus) {
@@ -522,12 +846,23 @@ public class TermuxFloatView extends LinearLayout {
         setAlpha(newFocus ? ALPHA_FOCUS : ALPHA_NOT_FOCUS);
     }
 
+    /** Update the remembered user-chosen window position (used when the bubble is dragged). */
+    void setBaseWindowPosition(int x, int y) {
+        initialX = x;
+        mBaseWindowY = Math.max(0, y - mImeShift);
+        initialY = mBaseWindowY;
+    }
+
     public void closeFloatingWindow() {
+        removeKeyboardListener();
+        endSelectionMode();
         if (getWindowToken() != null)
             mWindowManager.removeView(this);
 
-        mFloatingBubbleManager.cleanup();
-        mFloatingBubbleManager = null;
+        if (mFloatingBubbleManager != null) {
+            mFloatingBubbleManager.cleanup();
+            mFloatingBubbleManager = null;
+        }
     }
 
     private void exit() {
@@ -535,7 +870,102 @@ public class TermuxFloatView extends LinearLayout {
         getContext().startService(exitIntent);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Soft keyboard (IME) handling
+    //
+    // The floating window is an overlay, so the IME is drawn *on top of* it instead of pushing
+    // it up like it does for a normal activity. Without correction the bottom of the window
+    // (terminal rows and the extra keys bar) would simply be hidden behind the keyboard.
+    // The window is therefore shifted up and squeezed into the space that is left above the IME.
+    // ---------------------------------------------------------------------------------------
 
+    private void installKeyboardListener() {
+        if (mGlobalLayoutListener != null) return;
+        mGlobalLayoutListener = this::onGlobalLayoutForIme;
+        getViewTreeObserver().addOnGlobalLayoutListener(mGlobalLayoutListener);
+    }
+
+    private void removeKeyboardListener() {
+        if (mGlobalLayoutListener == null) return;
+        ViewTreeObserver observer = getViewTreeObserver();
+        if (observer != null && observer.isAlive())
+            observer.removeOnGlobalLayoutListener(mGlobalLayoutListener);
+        mGlobalLayoutListener = null;
+    }
+
+    private void onGlobalLayoutForIme() {
+        if (mAdjustingWindow || isResizing || isInLongPressState) return;
+        if (mFloatingBubbleManager != null && mFloatingBubbleManager.isMinimized()) return;
+
+        if (DISPLAY_WIDTH <= 0 || DISPLAY_HEIGHT <= 0) updateDisplaySize();
+
+        android.graphics.Rect visibleFrame = new android.graphics.Rect();
+        getWindowVisibleDisplayFrame(visibleFrame);
+        int visibleFrameHeight = visibleFrame.height();
+        int covered = DISPLAY_HEIGHT - visibleFrameHeight;
+        boolean imeVisible = covered > Math.max(1, (int) (DISPLAY_HEIGHT * IME_MIN_FRACTION));
+
+        if (imeVisible == mImeVisible) {
+            if (imeVisible) {
+                // Keyboard size can change (e.g. suggestion bar toggled): re-apply if it differs.
+                int newShift = covered;
+                if (Math.abs(newShift - mImeShift) > 8) {
+                    mImeShift = newShift;
+                    adjustForIme(true);
+                }
+            }
+            return;
+        }
+
+        mImeVisible = imeVisible;
+        mImeShift = imeVisible ? covered : 0;
+        adjustForIme(imeVisible);
+    }
+
+    /** Shift and squeeze the window so that it stays above the soft keyboard. */
+    private void adjustForIme(boolean imeVisible) {
+        if (layoutParams == null || mWindowManager == null || getWindowToken() == null) return;
+
+        // Remember the user's own window geometry while the keyboard is closed.
+        if (!imeVisible && !mImeVisible) {
+            mBaseWindowY = layoutParams.y;
+            mBaseWindowHeight = layoutParams.height;
+        }
+
+        int newHeight;
+        int newY;
+        if (imeVisible) {
+            // Keep the top edge where the user put it, and give up as much height as the keyboard
+            // needs; the terminal reflows to fewer rows. When the window would become too small,
+            // slide it up instead so the extra keys bar stays reachable directly above the IME.
+            int keyboardTop = Math.max(0, DISPLAY_HEIGHT - mImeShift - IME_CLEARANCE_PX);
+            int availableAboveIme = keyboardTop - 40;
+            newHeight = Math.min(mBaseWindowHeight, Math.max(MIN_IME_WINDOW_HEIGHT, availableAboveIme));
+            newY = mBaseWindowY;
+            if (mBaseWindowY + newHeight > keyboardTop - 8) {
+                newY = Math.max(0, keyboardTop - 8 - newHeight);
+            }
+        } else {
+            newHeight = mBaseWindowHeight;
+            newY = mBaseWindowY;
+        }
+
+        if (layoutParams.height == newHeight && layoutParams.y == newY) return;
+
+        mAdjustingWindow = true;
+        try {
+            layoutParams.height = newHeight;
+            layoutParams.y = newY;
+            mWindowManager.updateViewLayout(this, layoutParams);
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "adjustForIme failed", e);
+        } finally {
+            // Layout callbacks are posted, so clear the guard on the next main thread pass.
+            mHandler.post(() -> mAdjustingWindow = false);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
 
     public boolean isVisible() {
         return isAttachedToWindow() && isShown();
@@ -561,6 +991,15 @@ public class TermuxFloatView extends LinearLayout {
         return mProperties;
     }
 
+    /** Get the extra keys view, or {@code null} before {@link #initFloatView} ran. */
+    public ExtraKeysView getExtraKeysView() {
+        return mExtraKeysView;
+    }
+
+    /** Glyph shown inside the collapsed bubble (the terminal view is hidden then). */
+    public View getBubbleIcon() {
+        return findViewById(R.id.bubble_icon);
+    }
 
     public void reloadViewStyling() {
         // Leaving here for future support for termux-reload-settings

@@ -8,7 +8,7 @@
 
 <resources>
     <string name="app_name">&TERMUX_FLOAT_APP_NAME;</string>
-	<string name="initial_instruction_toast">Long press on window to move or resize\n\nDouble tap and drag finger up or down to change font size</string>
+	<string name="initial_instruction_toast">Drag the top bar to move, pinch with two fingers to resize\n\nLong press the terminal to select text, then use the blue bar or the CPY/PSTE keys</string>
 	<string name="after_long_press">Drag to position and pinch to resize</string>
 
     <string name="draw_overlay_permission_explanation">This app requires permission to draw overlays.</string>
@@ -20,4 +20,16 @@
 
     <string name="no_text_selected">No text selected</string>
     <string name="text_copied">Copied to clipboard</string>
+    <string name="clipboard_empty">Clipboard is empty</string>
+    <string name="nothing_to_copy">Nothing to copy</string>
+
+    <string name="action_minimize">Minimize to bubble</string>
+    <string name="action_exit">Close terminal</string>
+    <string name="action_copy">COPY</string>
+    <string name="action_copy_all">COPY ALL</string>
+    <string name="action_paste">PASTE</string>
+    <string name="action_done">DONE</string>
+    <string name="drag_handle_description">Drag to move window</string>
+    <string name="selection_mode_hint">Text selection: drag the handles, then COPY</string>
+    <string name="bubble_glyph">$_</string>
 </resources>

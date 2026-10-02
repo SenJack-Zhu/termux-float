@@ -10,11 +10,69 @@ A [Termux] plugin app to show the terminal in a floating terminal window.
 
 ### Contents
 - [Installation](#Installation)
+- [Floating window usage](#Floating-window-usage)
 - [Terminal and App Settings](#Terminal-and-App-Settings)
 - [Debugging](#Debugging)
+- [Building](#Building)
 - [Worthy Of Note](#Worthy-Of-Note)
 - [For Maintainers and Contributors](#For-Maintainers-and-Contributors)
 - [Forking](#Forking)
+##
+
+
+
+### Floating window usage
+
+This fork focuses on making the floating terminal comfortable to *use* on a phone, not just to
+look at. Everything below was verified on a real device (Android 15, 1080x2412, 480 dpi) with
+`adb`, and the app runs as an ordinary unprivileged app (uid `u0_aXXX`) — it does **not** need
+`root`.
+
+**Window layout (top to bottom):** control bar (minimize / drag handle / close) → optional text
+selection bar → terminal → hotkey bar.
+
+| Action | How |
+|---|---|
+| Move the window | drag the top control bar (the grip area between the two round buttons) |
+| Resize | two-finger pinch anywhere in the window |
+| Collapse to a bubble | the circle button at the top left; tap the bubble to restore it |
+| Type | tap the terminal, the soft keyboard opens |
+
+**Hotkey bar.** Two rows of keys sit directly *below* the terminal so they end up just above the
+soft keyboard when it is open, within thumb reach:
+
+- Row 1: `ESC` `TAB` `CTL` `ALT` `SHF` `FN` `<` `v` `^` `>`
+- Row 2: `PG^` `PGv` `HOM` `END` `/` `-` `|` `~` `KBD` `CPY` `PST` `ALL` `^C` `^D` `^L` `^Z`
+
+`CTL`, `ALT`, `SHF` and `FN` are **sticky**: tap to arm them (the button lights up), and the next
+key typed on the soft keyboard or any on-screen key is modified. This also works for characters
+typed with the system keyboard, and `FN` maps letters to the terminal's function keys
+(`FN`+`w/a/s/d` = arrows, `FN`+`p`/`n` = page up/down, `FN`+`1..0` = F1..F10). Long press a sticky
+key to lock it.
+
+`KBD` shows the soft keyboard. `CPY`, `ALL` and `PST` handle the clipboard, `^C`/`^D`/`^L`/`^Z`
+send control characters.
+
+**Copy and paste.** The system text-selection toolbar cannot be relied on inside an overlay
+window, so this fork adds its own:
+
+- Long press the terminal to start the terminal's text selection (drag the handles as usual). A
+  blue selection bar appears with `COPY`, `COPY ALL`, `PASTE` and `DONE`.
+- `COPY` copies the current selection. When nothing is selected it falls back to the whole visible
+  screen, so the button never silently does nothing.
+- `ALL` copies the terminal screen (scrollback included, trailing blank cells trimmed).
+- `PST` pastes the clipboard. Multi-line clipboard content is flattened to a single line first, so
+  pasting a snippet cannot run a batch of shell commands by accident.
+
+**Soft keyboard handling.** The window is an overlay, so the keyboard is drawn *on top of* it
+instead of pushing it up. The window therefore watches the IME and, while the keyboard is open,
+squeezes itself into the space above it (plus a margin for keyboard toolbars such as clipboard or
+suggestion rows) so that the hotkey bar stays tappable. The original size and position are
+restored when the keyboard closes.
+
+Known device-dependent limitation: hiding an already visible keyboard from an overlay window is not
+supported by every IME (`hideSoftInputFromWindow()` requires a normal application window token).
+The system back key always works for that.
 ##
 
 
@@ -76,8 +134,34 @@ Once log levels have been set, you can run the `logcat` command in `Termux` or `
 ##### Log Levels
 - `Off` - Log nothing
 - `Normal` - Start logging error, warn and info messages and stacktraces
-- `Debug` - Start logging debug messages
-- `Verbose` - Start logging verbose messages
+- `Debug` - Start logging debug messages- `Verbose` - Start logging verbose messages
+##
+
+
+
+### Building
+
+Requires `JDK 17` and an Android SDK with `platforms;android-35` and `build-tools;35.0.0`.
+
+```sh
+./gradlew assembleDebug          # -> app/build/outputs/apk/debug/termux-float-app_v0.17.0+debug.apk
+```
+
+On Windows the helper scripts in `tools/` wrap the local toolchain and the device workflow:
+
+```powershell
+pwsh -File tools/build.ps1            # build (sets JAVA_HOME/ANDROID_HOME, uses the local jitpack mirror)
+pwsh -File tools/deploy.ps1           # install on the connected device and restart the service
+pwsh -File tools/regression.ps1       # end-to-end checks over adb: hotkeys, clipboard, bubble, IME geometry
+pwsh -File tools/tap-hotkey.ps1 -Key CPY   # tap one hotkey by its measured on-screen bounds
+```
+
+`com.termux.termux-app:termux-shared:8aca6dbbf4` and `:terminal-view:8aca6dbbf4` are pulled from
+`jitpack.io`. If jitpack is unreachable (or fails its TLS handshake through a proxy, which also
+breaks Gradle's own downloader), point `TERMUX_FLOAT_LOCAL_REPO` at a maven-layout directory that
+contains those artifacts; `tools/build.ps1` picks it up automatically.
+
+GitHub Actions (`.github/workflows/github_action_build.yml`) builds the same debug APK on push.
 ##
 
 

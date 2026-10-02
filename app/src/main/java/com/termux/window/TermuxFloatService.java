@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.IBinder;
 
 import androidx.annotation.Nullable;
+import androidx.appcompat.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 
@@ -186,8 +187,13 @@ public class TermuxFloatService extends Service {
     private boolean initializeFloatView() {
         boolean floatWindowWasNull = false;
         if (mFloatingWindow == null) {
-            mFloatingWindow = (TermuxFloatView) ((LayoutInflater)
-                    getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.activity_main, null);
+            // A Service context is not themed with the application theme, and the Material buttons
+            // inside the extra keys bar refuse to be created without an AppCompat theme, so the
+            // layout must be inflated with the app theme applied.
+            Context themedContext = new ContextThemeWrapper(this, R.style.AppTheme);
+            LayoutInflater inflater = ((LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE))
+                    .cloneInContext(themedContext);
+            mFloatingWindow = (TermuxFloatView) inflater.inflate(R.layout.activity_main, null);
             floatWindowWasNull = true;
         }
 
@@ -221,6 +227,14 @@ public class TermuxFloatService extends Service {
     }
 
     private void setVisible(boolean newVisibility) {
+        if (mFloatingWindow == null) {
+            // The window was never created (or failed to initialize); there is nothing to toggle,
+            // and dereferencing it here used to crash the service.
+            Logger.logWarn(LOG_TAG, "Ignoring setVisible(" + newVisibility + "), floating window not initialized");
+            mVisibleWindow = newVisibility;
+            return;
+        }
+
         mVisibleWindow = newVisibility;
         mFloatingWindow.setVisibility(newVisibility ? View.VISIBLE : View.GONE);
         Notification notification = buildNotification();
